@@ -88,14 +88,17 @@ def main():
         count += 1
         if count % 30 == 0:
             print('res: ', res)
-        if count - res['total']['fail'] > 100:
-            break
         while len(token_queue) == 0:
             time.sleep(0.1)
+        if count - res['total']['fail'] > 100:
+            break
         threading.Thread(target=get_url, args=(token_queue.get_token(),)).start()
-
+        
     while len(threading.enumerate()) > 2:
         time.sleep(0.1)
+    # the last req must be success
+    while res['total']['success'] < 100:
+        get_url(token_queue.get_token())
     print('res: ', res)
 
 if __name__ == "__main__":
