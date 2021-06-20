@@ -10,7 +10,6 @@ import socket
 import sys
 import time
 import threading
-import pdb
 
 
 class TokenDueqe:
@@ -36,60 +35,68 @@ class TokenDueqe:
     def __str__(self):
         return str(self.deque)
 
-
 def get_dns_ip(domain):
-    a_recode = dns.resolver.resolve(domain, 'A') # 查询类型为A记录
+    a_recode = dns.resolver.resolve(domain, 'A') 
     addr_list = []
     for i in a_recode.response.answer:
         for j in i.items:
             addr_list.append(j.address)
-    # print('get_dns_ip() addr_list: ', addr_list)
     return addr_list
 
 def update_dns():
-    global domain_str, token_queue
-    while True:
-        time.sleep(5)
+    global domain_str, token_queue, res, main_thread_end_flag
+    while not main_thread_end_flag:
+        time.sleep(2)
         token_queue.update_token(get_dns_ip(domain_str))
 
 def get_url(url):
     try:
-        global res, req_line
+        global res, req_line, total_int_lock
         skt = socket.socket(ipvx, socket.SOCK_STREAM)
         skt.connect((url, 80))
         skt.send(req_line)
         response_code = int(skt.recv(20).split()[1]) # just http resp code
         skt.close()
-        if response_code >= 500:
-            res[url].setdefault('fail', 0)
-            res[url]['fail'] += 1
-        elif 200 <= response_code < 500:
-            res[url].setdefault('success', 0)
-            res[url]['success'] += 1
-    except Exception as err:
-        raise err
-        res[url].setdefault('fail', 0)
+        if 200 <= response_code <= 500:
+            key = 'success'
+        else:
+            key = 'fail'
+        res[url][key] += 1
+        total_int_lock.acquire()
+        res['total'][key] += 1
+        total_int_lock.release()
+    except socket.timeout:
         res[url]['fail'] += 1
+        total_int_lock.acquire()
+        res['total']['fail'] += 1
+        total_int_lock.release()
+    except Exception as err:
+        res[url]['fail'] += 1
+        total_int_lock.acquire()
+        res['total']['fail'] += 1
+        total_int_lock.release()
+        raise err
     finally:
         global token_queue
         token_queue.produce_token(url)
-        
 
 def main():
     global token_queue, res
     threading.Thread(target=update_dns).start()
     count = 0
-    pdb.set_trace()
     while True:
         count += 1
-        if count % 10 == 0:
-            print ('res: ', res)
-            print ('token_queue: ', token_queue)
-            if count == 100:
-                break
+        if count % 30 == 0:
+            print('res: ', res)
+        if count - res['total']['fail'] > 100:
+            break
         while len(token_queue) == 0:
             time.sleep(0.1)
         threading.Thread(target=get_url, args=(token_queue.get_token(),)).start()
+
+    while len(threading.enumerate()) > 2:
+        time.sleep(0.1)
+    print('res: ', res)
 
 if __name__ == "__main__":
     domain_str = sys.argv[1]
@@ -100,8 +107,14 @@ if __name__ == "__main__":
     
     iplist = get_dns_ip(domain_str)
     token_queue = TokenDueqe(iplist)
+    res = {}
+    for ip_str in iplist:
+        res[ip_str] = {'success': 0, 'fail': 0}
+    total_int_lock = threading.Lock()
+    res['total'] = {'success': 0, 'fail': 0}
     
-    res = collections.defaultdict(dict)
+    main_thread_end_flag = False
     print('main() start, token_queue: ', token_queue)
     main()
+    main_thread_end_flag = True
 
