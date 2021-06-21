@@ -52,6 +52,7 @@ def update_dns():
 def get_url(url):
     try:
         global res, req_line, total_int_lock
+        key = 'fail'
         skt = socket.socket(ipvx, socket.SOCK_STREAM)
         skt.connect((url, 80))
         skt.send(req_line)
@@ -59,25 +60,16 @@ def get_url(url):
         skt.close()
         if 200 <= response_code <= 500:
             key = 'success'
-        else:
-            key = 'fail'
+    except socket.timeout:
+        pass
+    except Exception as err:
+        raise err
+    finally:
+        global token_queue
         res[url][key] += 1
         total_int_lock.acquire()
         res['total'][key] += 1
         total_int_lock.release()
-    except socket.timeout:
-        res[url]['fail'] += 1
-        total_int_lock.acquire()
-        res['total']['fail'] += 1
-        total_int_lock.release()
-    except Exception as err:
-        res[url]['fail'] += 1
-        total_int_lock.acquire()
-        res['total']['fail'] += 1
-        total_int_lock.release()
-        raise err
-    finally:
-        global token_queue
         token_queue.produce_token(url)
 
 def main():
